@@ -1,0 +1,8 @@
+# Ignore everything
+*
+
+# Except these files
+!.gitignore
+!download.py
+!sanity_check.py
+!segment.py
