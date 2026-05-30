@@ -6,7 +6,7 @@ from transformers import pipeline
 
 # Load depth estimation model
 print("Loading depth model...")
-depth_estimator = pipeline("depth-estimation", model="Intel/dpt-large")
+depth_estimator = pipeline("depth-estimation", model="depth-anything/Depth-Anything-V2-Small-hf")
 
 # Create output folder
 os.makedirs("data/depths", exist_ok=True)
