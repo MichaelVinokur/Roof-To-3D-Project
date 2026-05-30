@@ -18,7 +18,7 @@ mask_generator = SamAutomaticMaskGenerator(
     model=sam,
     points_per_side=32,
     pred_iou_thresh=0.88,
-    min_mask_region_area=2000
+    min_mask_region_area=3000  # raised from 2000 to filter out small noise better
 )
 
 scene_dir = "data/TLV/New_Photos"
@@ -47,10 +47,30 @@ for scene_filename in scene_files:
     print(f"  SAM found {len(masks)} segments total")
 
     image_area = h * w
-    roof_masks = [m for m in masks if 0.05 < m["segmentation"].sum() / image_area < 0.90]
+    roof_masks = []
+    for m in masks:
+        mask_area = m["segmentation"].sum()
+        coverage = mask_area / image_area
+
+        # Filter 1: coverage between 5% and 50% of image
+        # (roofs shouldn't dominate the whole image)
+        if not (0.05 < coverage < 0.50):
+            continue
+
+        # Filter 2: aspect ratio — roofs are roughly square/rectangular
+        # not long thin strips (those are roads, shadows, fences)
+        x, y, bw, bh = m["bbox"]
+        aspect_ratio = max(bw, bh) / (min(bw, bh) + 1e-6)
+        if aspect_ratio > 2.5:
+            continue
+
+        roof_masks.append(m)
+
+    # Sort largest first
     roof_masks = sorted(roof_masks, key=lambda x: x["segmentation"].sum(), reverse=True)
     print(f"  {len(roof_masks)} roof candidates after filtering")
 
+    # Save each roof crop
     for i, m in enumerate(roof_masks):
         seg = m["segmentation"]
         x, y, bw, bh = [int(v) for v in m["bbox"]]
@@ -59,9 +79,11 @@ for scene_filename in scene_files:
         crop_path = f"data/crops/{scene_name}_roof_{i:02d}.png"
         cv2.imwrite(crop_path, cv2.cvtColor(roof_crop, cv2.COLOR_RGB2BGR))
 
+    # Save visualization
     overlay = img_rgb.copy()
     for m in roof_masks:
-        overlay[m["segmentation"]] = np.random.randint(100, 255, 3)
+        color = np.random.randint(100, 255, 3)
+        overlay[m["segmentation"]] = color
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 7))
     axes[0].imshow(img_rgb)
