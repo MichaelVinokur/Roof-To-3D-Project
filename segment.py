@@ -16,12 +16,13 @@ sam.to(device=device)
 
 mask_generator = SamAutomaticMaskGenerator(
     model=sam,
-    points_per_side=32,
-    pred_iou_thresh=0.88,
-    min_mask_region_area=3000  # raised from 2000 to filter out small noise better
+    points_per_side=32,        # was 32 — scan more densely to find roof sub-regions
+    pred_iou_thresh=0.86,      # was 0.88 — higher confidence only
+    stability_score_thresh=0.90,  # new — masks must be very stable
+    min_mask_region_area=1000
 )
 
-scene_dir = "data/TLV/New_Photos"
+scene_dir = "data/TLV/Small_Photos"
 scene_files = sorted([f for f in os.listdir(scene_dir) if f.endswith((".png", ".jpg"))])
 print(f"Found {len(scene_files)} scene images")
 
@@ -30,7 +31,12 @@ for scene_filename in scene_files:
     img_path = f"{scene_dir}/{scene_filename}"
 
     img = cv2.imread(img_path)
-    img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    if img is None:
+        from PIL import Image as PilImage
+        pil = PilImage.open(img_path).convert("RGB")
+        img_rgb = np.array(pil)
+    else:
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     h, w = img_rgb.shape[:2]
 
     # Resize if too large for GPU (max 2048 on longest side)
@@ -47,30 +53,40 @@ for scene_filename in scene_files:
     print(f"  SAM found {len(masks)} segments total")
 
     image_area = h * w
-    roof_masks = []
-    for m in masks:
-        mask_area = m["segmentation"].sum()
-        coverage = mask_area / image_area
+    img_hsv = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2HSV)
 
-        # Filter 1: coverage between 5% and 50% of image
-        # (roofs shouldn't dominate the whole image)
-        if not (0.05 < coverage < 0.50):
-            continue
-
-        # Filter 2: aspect ratio — roofs are roughly square/rectangular
-        # not long thin strips (those are roads, shadows, fences)
+    def is_roof(m):
+        seg = m["segmentation"]
+        # Coverage filter: must be 3%-35% of image
+        coverage = seg.sum() / image_area
+        if not (0.10 < coverage < 0.80):
+            return False
+        # Aspect ratio filter: reject long thin strips (roads, fences)
         x, y, bw, bh = m["bbox"]
-        aspect_ratio = max(bw, bh) / (min(bw, bh) + 1e-6)
-        if aspect_ratio > 2.5:
-            continue
+        if max(bw, bh) / (min(bw, bh) + 1e-6) > 3.5:
+            return False
+        # Color filter: reject green vegetation (grass, trees)
+        region_hsv = img_hsv[seg]
+        hue = region_hsv[:, 0]
+        sat = region_hsv[:, 1]
+        green_pixels = ((hue > 35) & (hue < 85) & (sat > 40)).sum()
+        if green_pixels / len(hue) > 0.35:
+            return False
+        # Color filter: reject bright blue (sky, pools, cars)
+        #blue_pixels = ((hue > 100) & (hue < 130) & (sat > 60)).sum()
+        #if blue_pixels / len(hue) > 0.4:
+            #return False
+        # Large segments must contain the image center (roof is always main subject)
+        #if coverage > 0.35:
+            #cy_img, cx_img = h // 2, w // 2
+            #if not seg[cy_img, cx_img]:
+                #return False
+        return True
 
-        roof_masks.append(m)
-
-    # Sort largest first
+    roof_masks = [m for m in masks if is_roof(m)]
     roof_masks = sorted(roof_masks, key=lambda x: x["segmentation"].sum(), reverse=True)
     print(f"  {len(roof_masks)} roof candidates after filtering")
 
-    # Save each roof crop
     for i, m in enumerate(roof_masks):
         seg = m["segmentation"]
         x, y, bw, bh = [int(v) for v in m["bbox"]]
@@ -79,11 +95,9 @@ for scene_filename in scene_files:
         crop_path = f"data/crops/{scene_name}_roof_{i:02d}.png"
         cv2.imwrite(crop_path, cv2.cvtColor(roof_crop, cv2.COLOR_RGB2BGR))
 
-    # Save visualization
     overlay = img_rgb.copy()
     for m in roof_masks:
-        color = np.random.randint(100, 255, 3)
-        overlay[m["segmentation"]] = color
+        overlay[m["segmentation"]] = np.random.randint(100, 255, 3)
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 7))
     axes[0].imshow(img_rgb)

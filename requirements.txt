@@ -1,0 +1,11 @@
+# Install PyTorch FIRST — separately — before installing this file.
+# See README.md for the exact command based on whether you have an NVIDIA GPU or not.
+
+numpy==2.4.4
+opencv-python==4.13.0.92
+Pillow==12.2.0
+matplotlib==3.10.9
+open3d==0.19.0
+transformers==5.9.0
+huggingface_hub==1.15.0
+segment-anything==1.0
