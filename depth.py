@@ -6,7 +6,7 @@ from transformers import pipeline
 
 # Load depth estimation model
 print("Loading depth model...")
-depth_estimator = pipeline("depth-estimation", model="depth-anything/Depth-Anything-V2-Small-hf")
+depth_estimator = pipeline("depth-estimation", model="depth-anything/Depth-Anything-V2-Large-hf")
 
 # Create output folder
 os.makedirs("data/depths", exist_ok=True)
@@ -32,9 +32,17 @@ for filename in crop_files:
     result = depth_estimator(pil_img)
     depth_map = np.array(result["depth"])
 
-    # Normalize depth to 0-255 for saving
-    depth_normalized = cv2.normalize(depth_map, None, 0, 255, cv2.NORM_MINMAX)
-    depth_normalized = depth_normalized.astype(np.uint8)
+    # Percentile clipping before normalization.
+    # Plain NORM_MINMAX anchors to the background zeros, squashing real roof depth
+    # into a narrow band. Clipping to the 2nd-98th percentile of non-zero pixels
+    # stretches the actual roof depth across the full 0-255 range.
+    nonzero = depth_map[depth_map > 0]
+    if len(nonzero) > 100:
+        p_low, p_high = np.percentile(nonzero, 5), np.percentile(nonzero, 95)
+    else:
+        p_low, p_high = depth_map.min(), depth_map.max()
+    depth_clipped = np.clip(depth_map, p_low, p_high)
+    depth_normalized = cv2.normalize(depth_clipped, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
 
     # Save depth map
     out_path = f"data/depths/{filename.replace('.png', '_depth.png')}"
