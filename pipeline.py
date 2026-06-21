@@ -1,8 +1,24 @@
 import subprocess
 import sys
 import os
+import shutil
 
 PYTHON = sys.executable
+
+# Clear all intermediate and output folders so every run starts fresh
+# from whatever images are currently in data/TLV/Small_Photos/
+CLEAN_DIRS = [
+    "data/crops",
+    "data/depths",
+    "data/pointclouds",
+    "outputs/meshes",
+]
+print("Cleaning previous run...")
+for d in CLEAN_DIRS:
+    if os.path.exists(d):
+        shutil.rmtree(d)
+    os.makedirs(d)
+print("Done — starting fresh.\n")
 
 STEPS = [
     ("Segmentation",   "segment.py"),

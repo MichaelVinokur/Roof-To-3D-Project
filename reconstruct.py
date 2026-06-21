@@ -75,13 +75,15 @@ for filename in crop_files:
 
     # Visualization walls: find every boundary edge and drop it to Z=0.
     # Wall vertices are grey so they're visually distinct from the roof texture.
+    WALL_BOTTOM = -max(h, w) * 0.3  # walls scale with crop size — tune 0.4 up/down
+
     wall_bottom_verts = {}
 
     def get_wall_v(top_idx):
         if top_idx not in wall_bottom_verts:
             x, y, _ = vertices[top_idx]
             new_idx = len(vertices)
-            vertices.append([x, y, 0.0])
+            vertices.append([x, y, WALL_BOTTOM])
             colors.append([0.65, 0.65, 0.70])
             wall_bottom_verts[top_idx] = new_idx
         return wall_bottom_verts[top_idx]
@@ -133,7 +135,37 @@ for filename in crop_files:
 
     out_path = f"outputs/meshes/{filename.replace('.png', '.obj')}"
     o3d.io.write_triangle_mesh(out_path, mesh)
-    print(f"Saved {out_path} ({len(mesh.vertices)} vertices, {len(mesh.triangles)} triangles)")
+    size_kb = os.path.getsize(out_path) / 1024
+    if size_kb < 1000:
+        os.remove(out_path)
+        print(f"Deleted {out_path} — too small ({size_kb:.0f} KB)")
+        skipped += 1
+        continue
+    print(f"Saved {out_path} ({len(mesh.vertices)} vertices, {len(mesh.triangles)} triangles, {size_kb:.0f} KB)")
     success += 1
 
 print(f"\nDone — {success} meshes saved to outputs/meshes/, {skipped} skipped.")
+
+# For each source image, delete any roof mesh that is less than 60% of the
+# size of the heaviest roof from that same image.
+from collections import defaultdict
+
+mesh_dir = "outputs/meshes"
+obj_files = [f for f in os.listdir(mesh_dir) if f.endswith(".obj")]
+
+groups = defaultdict(list)
+for f in obj_files:
+    base = f.rsplit("_roof_", 1)[0]  # "image3" from "image3_roof_02.obj"
+    groups[base].append(f)
+
+removed = 0
+for base, files in groups.items():
+    sizes = {f: os.path.getsize(os.path.join(mesh_dir, f)) for f in files}
+    max_size = max(sizes.values())
+    for f, size in sizes.items():
+        if size < max_size * 0.6:
+            os.remove(os.path.join(mesh_dir, f))
+            print(f"Deleted {f} — {size/1024:.0f} KB is less than 60% of heaviest ({max_size/1024:.0f} KB)")
+            removed += 1
+
+print(f"Removed {removed} meshes that were less than 60% of the heaviest roof per image.")
